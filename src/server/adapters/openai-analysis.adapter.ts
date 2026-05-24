@@ -1,5 +1,6 @@
 import {
   APIConnectionError,
+  APIConnectionTimeoutError,
   APIError,
   InternalServerError,
   OpenAI,
@@ -55,6 +56,120 @@ const SYSTEM_PROMPT = [
 
 const ATTEMPTS = 3;
 
+function analysisErrorStages(err: unknown): string[] {
+  const msgs: string[] = [];
+  let cur: unknown = err;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (!(cur instanceof AnalysisExecutionError)) {
+      break;
+    }
+
+    msgs.push(cur.message);
+
+    const nextCause = cur.causeUnknown;
+
+    if (nextCause !== undefined && nextCause !== null) {
+      cur = nextCause;
+      continue;
+    }
+
+    break;
+  }
+
+  return msgs;
+}
+
+function leafWrappedCause(root: AnalysisExecutionError): unknown {
+  let cur: unknown = root;
+
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (!(cur instanceof AnalysisExecutionError)) {
+      return cur;
+    }
+
+    const next = cur.causeUnknown;
+
+    if (next !== undefined && next !== null && next instanceof AnalysisExecutionError) {
+      cur = next;
+      continue;
+    }
+
+    return next;
+  }
+
+  return cur instanceof AnalysisExecutionError ? cur.causeUnknown : cur;
+}
+
+/** Safe fields only (no API keys); helps diagnose 502s in logs. */
+function openAiLeafDiagnostics(leaf: unknown): Record<string, unknown> {
+  if (leaf instanceof APIConnectionTimeoutError) {
+    return {
+      failure_kind: "openai_connection_timeout",
+      terminal_message: leaf.message,
+    };
+  }
+
+  if (leaf instanceof APIConnectionError) {
+    return {
+      failure_kind: "openai_connection",
+      terminal_message: leaf.message,
+    };
+  }
+
+  if (
+    leaf instanceof APIError
+    && typeof leaf.status === "number"
+  ) {
+    const bodyError = leaf.error;
+    let openai_detail: Record<string, unknown> | undefined;
+
+    if (
+      typeof bodyError === "object"
+      && bodyError !== null
+      && typeof (bodyError as { message?: unknown }).message === "string"
+    ) {
+      const m = bodyError as { message: string };
+      openai_detail = { message: m.message };
+      const ct = (bodyError as { code?: unknown }).code;
+
+      if (typeof ct === "string") {
+        openai_detail.code = ct;
+      }
+    }
+
+    return {
+      failure_kind:
+        leaf instanceof RateLimitError
+          ? "openai_rate_limit"
+          : leaf instanceof InternalServerError
+            ? "openai_upstream_5xx"
+            : leaf.status === 401
+              ? "openai_authentication"
+              : "openai_http_error",
+      openai_http_status: leaf.status,
+      openai_code: leaf.code ?? null,
+      openai_type: leaf.type ?? null,
+      openai_request_id: leaf.requestID ?? null,
+      openai_terminal_message: leaf.message,
+      ...(typeof openai_detail !== "undefined" ? { openai_api_error_body: openai_detail } : {}),
+    };
+  }
+
+  if (leaf instanceof Error) {
+    return {
+      failure_kind: "generic_error",
+      error_name: leaf.name,
+      terminal_message: leaf.message,
+    };
+  }
+
+  if (leaf !== undefined && leaf !== null) {
+    return { failure_kind: "unknown_throwable", detail: String(leaf) };
+  }
+
+  return { failure_kind: "no_leaf_cause" };
+}
+
 export class OpenAIAnalysisAdapter implements IAnalysisPort {
   private readonly client: OpenAI;
 
@@ -101,10 +216,20 @@ export class OpenAIAnalysisAdapter implements IAnalysisPort {
         err instanceof AnalysisExecutionError
           ? err
           : new AnalysisExecutionError("OpenAI adapter failed", err);
+      const stages = analysisErrorStages(failure);
+
+      const leaf =
+        failure instanceof AnalysisExecutionError
+          ? leafWrappedCause(failure)
+          : err;
+
       this.log.warn("openai_analysis_finished", {
         model: this.model,
         outcome: "error",
         durationMs: Date.now() - started,
+        analysis_pipeline_stages:
+          stages.length > 0 ? stages : failure.message,
+        ...openAiLeafDiagnostics(leaf ?? err),
       });
       throw failure;
     }
