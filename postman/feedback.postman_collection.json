@@ -1,0 +1,20 @@
+{
+  "info": {
+    "_postman_id": "feedback-app-smoke-local",
+    "name": "Feedback App — smoke (expand in Phase 5.2)",
+    "schema":
+      "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Smoke check against the Next app root. Extend for /api/feedback."
+  },
+  "item": [
+    {
+      "name": "GET / (app up)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/"
+      },
+      "response": []
+    }
+  ]
+}
