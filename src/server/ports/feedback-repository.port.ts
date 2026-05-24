@@ -6,11 +6,21 @@ import type {
 } from "@/server/models";
 import type { PaginatedResult } from "@/server/models/paginated-result";
 
+export type PersistFeedbackOutcome = {
+  reused: boolean;
+  record: FeedbackRecord;
+};
+
 export interface IFeedbackRepository {
-  create(
+  findFeedbackByIdempotencyKey(requestKey: string): Promise<
+    FeedbackRecord | null
+  >;
+
+  persistFeedback(
+    idempotencyKey: string | null,
     input: CreateFeedbackInput,
     analysis: FeedbackAnalysis,
-  ): Promise<FeedbackRecord>;
+  ): Promise<PersistFeedbackOutcome>;
 
   findById(id: number): Promise<FeedbackRecord | null>;
 

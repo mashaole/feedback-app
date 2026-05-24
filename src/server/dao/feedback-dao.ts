@@ -11,8 +11,13 @@ import type { PaginatedResult } from "@/server/models/paginated-result";
 import type { IFeedbackRepository } from "@/server/ports/feedback-repository.port";
 import type { ILogger } from "@/server/ports/logger.port";
 import type { Pool, QueryResult, QueryResultRow } from "pg";
+import { DatabaseError } from "pg";
 
 const MAX_PAGE_SIZE = 100;
+
+function isPgUniqueViolation(err: unknown): boolean {
+  return err instanceof DatabaseError && err.code === "23505";
+}
 
 function mapRow(row: FeedbackRow): FeedbackRecord {
   return {
@@ -73,17 +78,40 @@ export class FeedbackDao implements IFeedbackRepository {
     }
   }
 
-  async create(
+  async findFeedbackByIdempotencyKey(
+    requestKey: string,
+  ): Promise<FeedbackRecord | null> {
+    const sql = `
+      SELECT f.*
+      FROM feedback AS f
+      INNER JOIN feedback_idempotency AS i ON i.feedback_id = f.id
+      WHERE i.request_key = $1
+    `;
+
+    const res = await this.query<FeedbackRow>(
+      "findFeedbackByIdempotencyKey",
+      sql,
+      [requestKey],
+    );
+
+    const rowFound = res.rows[0];
+
+    return rowFound ? mapRow(rowFound) : null;
+  }
+
+  async persistFeedback(
+    idempotencyKey: string | null,
     input: CreateFeedbackInput,
     analysis: FeedbackAnalysis,
-  ): Promise<FeedbackRecord> {
-    const sql = `
+  ): Promise<{ reused: boolean; record: FeedbackRecord }> {
+    const insertSql = `
       INSERT INTO feedback (
         text, email, summary, sentiment, tags, priority, next_action
       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `;
-    const values: unknown[] = [
+
+    const insertValues: unknown[] = [
       input.text,
       input.email,
       analysis.summary,
@@ -92,12 +120,95 @@ export class FeedbackDao implements IFeedbackRepository {
       analysis.priority,
       analysis.nextAction,
     ];
-    const res = await this.query<FeedbackRow>("create", sql, values);
-    const row = res.rows[0];
-    if (!row) {
-      throw new Error("FeedbackDao.create returned no row");
+
+    if (idempotencyKey === null) {
+      const res = await this.query<FeedbackRow>(
+        "persistFeedback_plain",
+        insertSql,
+        insertValues,
+      );
+
+      const row = res.rows[0];
+
+      if (!row) {
+        throw new Error("FeedbackDao.persistFeedback returned no row");
+      }
+
+      return { reused: false, record: mapRow(row) };
     }
-    return mapRow(row);
+
+    const client = await this.pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      const prior = await client.query<FeedbackRow>(
+        `
+        SELECT f.*
+        FROM feedback AS f
+        INNER JOIN feedback_idempotency AS i ON i.feedback_id = f.id
+        WHERE i.request_key = $1
+      `,
+        [idempotencyKey],
+      );
+
+      const priorHit = prior.rows[0];
+
+      if (priorHit !== undefined && priorHit !== null) {
+        await client.query("COMMIT");
+
+        return { reused: true, record: mapRow(priorHit) };
+      }
+
+      const inserted = await client.query<FeedbackRow>(
+        insertSql,
+        insertValues,
+      );
+
+      const newRow = inserted.rows[0];
+
+      if (!newRow) {
+        throw new Error("FeedbackDao.persistFeedback insert returned no row");
+      }
+
+      try {
+        await client.query(
+          `
+          INSERT INTO feedback_idempotency (request_key, feedback_id)
+          VALUES ($1, $2)
+        `,
+          [idempotencyKey, newRow.id],
+        );
+      } catch (e: unknown) {
+        if (!isPgUniqueViolation(e)) {
+          throw e;
+        }
+
+        await client.query("ROLLBACK");
+
+        const won = await this.findFeedbackByIdempotencyKey(idempotencyKey);
+
+        if (won === null) {
+          throw new Error(
+            "Idempotency replay row missing after unique conflict.",
+          );
+        }
+
+        return { reused: true, record: won };
+      }
+
+      await client.query("COMMIT");
+
+      return { reused: false, record: mapRow(newRow) };
+    } catch (outer: unknown) {
+      await client.query("ROLLBACK");
+
+      throw outer;
+    }
+
+    finally {
+      client.release();
+    }
   }
 
   async findById(id: number): Promise<FeedbackRecord | null> {

@@ -7,17 +7,23 @@ export class AppError extends Error {
 
   readonly details?: ValidationIssue[];
 
+  readonly retryAfterMs?: number;
+
   constructor(
     message: string,
     statusCode: number,
     code: string,
     details?: ValidationIssue[],
+    retryAfterMs?: number,
   ) {
     super(message);
     this.name = "AppError";
     this.statusCode = statusCode;
     this.code = code;
     this.details = details;
+    if (retryAfterMs !== undefined) {
+      this.retryAfterMs = retryAfterMs;
+    }
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }

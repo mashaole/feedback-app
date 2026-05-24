@@ -28,6 +28,8 @@ import {
  */
 
 export interface ApplicationContainer {
+  env: ParsedEnv;
+
   feedbackService: FeedbackService;
 
   logger: ILogger;
@@ -72,5 +74,12 @@ export function createContainer(
     logger,
   );
 
-  return { feedbackService, logger };
+  return { env: parsedEnv, feedbackService, logger };
+}
+
+let singleton: ApplicationContainer | null = null;
+
+export function getApplicationContainer(): ApplicationContainer {
+  singleton ??= createContainer();
+  return singleton;
 }
