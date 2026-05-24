@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactElement } from "react";
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import { ErrorAlert } from "@/components/error-alert";
 import { ListSkeleton } from "@/components/list-skeleton";
@@ -236,6 +236,12 @@ function ListFiltersBar({
 
   disabledControls = false,
 }: ListFiltersBarProps): ReactElement {
+  const [isTagFiltersMounted, setIsTagFiltersMounted] = useState(false);
+
+  useEffect((): void => {
+    setIsTagFiltersMounted(true);
+  }, []);
+
   function handleTagFilterSubmit(ev: React.FormEvent<HTMLFormElement>): void {
     ev.preventDefault();
 
@@ -274,35 +280,60 @@ function ListFiltersBar({
         </select>
       </div>
 
-      <form onSubmit={handleTagFilterSubmit} className="flex gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="tag-q" className="text-xs font-medium uppercase">
-            Tag contains
-          </label>
+      {/* Mount after hydrate: password-manager extensions mutate inputs/buttons inside
+       named forms (e.g. data-dashlane-*) vs SSR HTML and cause hydration warnings. */}
+      {isTagFiltersMounted !== true ? (
+        <div className="flex gap-3" aria-busy="true">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium uppercase">Tag contains</span>
+            <div
+              aria-hidden={true}
+              className={
+                "h-[42px] min-w-[12rem] rounded-lg border px-3 py-2 " +
+                "dark:border-zinc-700 dark:bg-zinc-900"
+              }
+            />
+          </div>
 
-          <input
-            disabled={disabledControls === true}
-            id="tag-q"
-            aria-label="Filter inbox by tag substring match"
-            placeholder="billing"
-            defaultValue={filters.tag}
+          <div
+            aria-hidden={true}
             className={
-              "rounded-lg border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+              "self-end h-[38px] min-w-[4.75rem] rounded-full border px-5 py-2 " +
+              "text-sm dark:border-zinc-700"
             }
-            key={filters.tag}
-            type="text"
-            name="tag"
           />
         </div>
+      ) : (
+        <form onSubmit={handleTagFilterSubmit} className="flex gap-3">
+          <div className="flex flex-col gap-1">
+            <label htmlFor="tag-q" className="text-xs font-medium uppercase">
+              Tag contains
+            </label>
 
-        <button
-          className="self-end rounded-full border px-5 py-2 text-sm dark:border-zinc-700"
-          disabled={disabledControls === true}
-          type="submit"
-        >
-          Filter
-        </button>
-      </form>
+            <input
+              disabled={disabledControls === true}
+              id="tag-q"
+              aria-label="Filter inbox by tag substring match"
+              placeholder="billing"
+              defaultValue={filters.tag}
+              className={
+                "rounded-lg border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+              }
+              key={filters.tag}
+              type="text"
+              name="tag"
+            />
+          </div>
+
+          <button
+            className="self-end rounded-full border px-5 py-2 text-sm dark:border-zinc-700"
+            disabled={disabledControls === true}
+            type="submit"
+          >
+            Filter
+          </button>
+        </form>
+      )}
 
       <button
         disabled={disabledControls === true}

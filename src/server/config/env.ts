@@ -26,7 +26,8 @@ const envSchema = z
     ),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
     RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(60),
-    RATE_LIMIT_POST_MAX: z.coerce.number().int().positive().default(10),
+    // Must exceed Postman/Newman bursts (create + replay + pagSeedTarget; see README).
+    RATE_LIMIT_POST_MAX: z.coerce.number().int().positive().default(120),
 
     API_KEY: z.string().optional().default(""),
   })
