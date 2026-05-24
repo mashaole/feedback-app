@@ -28,7 +28,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run test` / `npm run test:unit` | Vitest (unit) |
 | `npm run test:watch` | Vitest watch |
 | `npm run test:integration` | Newman (Postman collection) |
-| `npm run db:migrate` | Apply SQL migrations |
+| `npm run db:migrate` | Apply SQL migrations (loads `.env` / `.env.local` for `DATABASE_URL`) |
 | `npm run docker:up` | Start Postgres (`docker compose up -d`) |
 | `npm run docker:down` | Stop Postgres (`docker compose down`) |
 
