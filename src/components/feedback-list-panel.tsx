@@ -18,6 +18,17 @@ function shorten(text: string, max: number): string {
   return `${text.slice(0, max)}…`;
 }
 
+function formatCreatedAt(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) {
+    return iso;
+  }
+  return parsed.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 /** Table client bound to FeedbackListProvider + URL filters */
 
 export function FeedbackListPanel(): ReactElement {
@@ -122,9 +133,11 @@ export function FeedbackListPanel(): ReactElement {
             <thead className="bg-zinc-100 text-xs uppercase dark:bg-zinc-900">
               <tr>
                 <th className="whitespace-nowrap px-4 py-2">ID</th>
-                <th className="whitespace-nowrap px-4 py-2">Text</th>
+                <th className="whitespace-nowrap px-4 py-2">Summary</th>
                 <th className="whitespace-nowrap px-4 py-2">Sentiment</th>
                 <th className="whitespace-nowrap px-4 py-2">Tags</th>
+                <th className="whitespace-nowrap px-4 py-2">Priority</th>
+                <th className="whitespace-nowrap px-4 py-2">Created</th>
               </tr>
             </thead>
             <tbody>
@@ -146,7 +159,7 @@ export function FeedbackListPanel(): ReactElement {
                     </Link>
                   </td>
                   <td className="max-w-md px-4 py-2">
-                    <span>{shorten(row.text, 240)}</span>
+                    <span>{shorten(row.summary, 160)}</span>
                   </td>
                   <td className="px-4 py-2">
                     <Badge kind="sentiment" value={row.sentiment} />
@@ -156,6 +169,14 @@ export function FeedbackListPanel(): ReactElement {
                       ariaLabel={`Tags row ${String(row.id)}`}
                       labels={row.tags}
                     />
+                  </td>
+                  <td className="px-4 py-2">
+                    <Badge kind="priority" value={row.priority} />
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-xs text-zinc-600 dark:text-zinc-400">
+                    <time dateTime={row.createdAt}>
+                      {formatCreatedAt(row.createdAt)}
+                    </time>
                   </td>
                 </tr>
               ))}

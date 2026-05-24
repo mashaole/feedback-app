@@ -244,7 +244,14 @@ export class FeedbackDao implements IFeedbackRepository {
 
     const whereClause = `
       WHERE ($1::text IS NULL OR sentiment = $1)
-      AND ($2::text IS NULL OR $2 = ANY(tags))
+      AND (
+        $2::text IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM unnest(tags) AS tag_entry(tag)
+          WHERE tag_entry.tag ILIKE '%' || $2 || '%'
+        )
+      )
     `;
 
     const countSql =

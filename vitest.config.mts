@@ -1,7 +1,10 @@
 import path from "node:path";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  plugins: [react()],
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -9,9 +12,18 @@ export default defineConfig({
   },
 
   test: {
+    pool: "threads",
     environment: "node",
+    environmentMatchGlobs: [
+      ["src/**/*.test.tsx", "happy-dom"],
+    ],
     setupFiles: ["./vitest.setup.ts"],
-    include: ["src/**/*.test.ts"],
+    server: {
+      deps: {
+        inline: ["@asamuzakjp/css-color", "@csstools/css-calc"],
+      },
+    },
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     coverage: {
       provider: "v8",
 
@@ -23,6 +35,7 @@ export default defineConfig({
       exclude: [
         "**/node_modules/**",
         "**/*.test.ts",
+        "**/*.test.tsx",
         "**/.next/**",
         "coverage/**",
         "**/postman/**",
