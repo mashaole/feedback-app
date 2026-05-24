@@ -7,6 +7,7 @@ export type {
   FeedbackAnalysis,
   FeedbackListQuery,
   FeedbackRecord,
+  FeedbackRow,
   PriorityLabel,
   SentimentLabel,
 } from "./feedback";

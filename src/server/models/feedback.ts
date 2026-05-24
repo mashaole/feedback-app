@@ -32,6 +32,21 @@ export interface FeedbackRecord {
   nextAction: string;
 }
 
+/**
+ * Column layout returned by Postgres `feedback` (`SELECT *` / `RETURNING *`).
+ */
+export interface FeedbackRow {
+  id: string;
+  text: string;
+  email: string | null;
+  created_at: Date;
+  summary: string;
+  sentiment: string;
+  tags: string[];
+  priority: string;
+  next_action: string;
+}
+
 export interface FeedbackListQuery {
   page: number;
   pageSize: number;
