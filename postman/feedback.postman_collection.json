@@ -1,18 +1,290 @@
 {
   "info": {
-    "_postman_id": "feedback-app-smoke-local",
-    "name": "Feedback App — smoke (expand in Phase 5.2)",
+    "_postman_id": "feedback-app-api",
+    "name": "Feedback App — API",
     "schema":
       "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Smoke check against the Next app root. Extend for /api/feedback."
+    "description": "Smoke + CRUD flow for `/api/feedback`: idempotency, **pagination seed loop** (`pagSeedTarget` rows), list + page-2 assertions. Set `apiKey` when `API_KEY` is configured."
   },
+  "variable": [
+    { "key": "feedbackId", "value": "", "type": "string" },
+    { "key": "idemPost", "value": "", "type": "string" },
+    { "key": "pagSeedCount", "value": "0", "type": "string" },
+    {
+      "key": "pagSeedTarget",
+      "value": "35",
+      "type": "string"
+    }
+  ],
+
   "item": [
     {
       "name": "GET / (app up)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.code === 200);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
         "url": "{{baseUrl}}/"
+      },
+      "response": []
+    },
+    {
+      "name": "OPTIONS /api/feedback (CORS preflight)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"no error status\", () => pm.response.code >= 200 && pm.response.code < 300);",
+              "pm.test(\"has CORS ACAO\", () => pm.response.headers.has(\"Access-Control-Allow-Origin\"));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "OPTIONS",
+        "header": [
+          { "key": "Origin", "value": "http://localhost:3000" },
+          { "key": "Access-Control-Request-Method", "value": "POST" },
+          {
+            "key": "Access-Control-Request-Headers",
+            "value": "Content-Type,x-api-key,Idempotency-Key"
+          },
+          { "key": "x-api-key", "value": "{{apiKey}}" }
+        ],
+        "url": "{{baseUrl}}/api/feedback"
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/feedback (create)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "pm.collectionVariables.set(\"idemPost\", \"idem:\" + Date.now() + \":\" + Math.random().toString(36).slice(2, 34));"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"status 201\", () => pm.response.code === 201);",
+              "const j = pm.response.json();",
+              "pm.expect(j).to.have.property(\"id\");",
+              "pm.collectionVariables.set(\"feedbackId\", String(j.id));",
+              "pm.expect((pm.response.headers.get(\"Idempotent-Replayed\") ?? \"\").toLowerCase()).to.eql(\"\");"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "content-type",
+            "value": "application/json"
+          },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Idempotency-Key", "value": "{{idemPost}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw":
+            "{\n  \"text\": \"Postman integration: UI feels slow on checkout.\",\n  \"email\": \"qa@example.org\"\n}"
+        },
+        "url": "{{baseUrl}}/api/feedback"
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/feedback (replay idempotency)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"status 201 on replay\", () => pm.response.code === 201);",
+              "const j = pm.response.json();",
+              "pm.expect(j.id).to.eql(Number(pm.collectionVariables.get(\"feedbackId\")));",
+              "pm.expect((pm.response.headers.get(\"Idempotent-Replayed\") ?? \"\").toLowerCase()).to.eql(\"true\");"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "content-type",
+            "value": "application/json"
+          },
+          { "key": "x-api-key", "value": "{{apiKey}}" },
+          { "key": "Idempotency-Key", "value": "{{idemPost}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw":
+            "{\n  \"text\": \"Different body should still replay first resource with same Idempotency-Key.\",\n  \"email\": null\n}"
+        },
+        "url": "{{baseUrl}}/api/feedback"
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/feedback (seed pagination)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const seedReq = \"POST /api/feedback (seed pagination)\";",
+              "pm.test(\"seed pagination row returns 201\", () => pm.expect(pm.response.code).to.eql(201));",
+              "const created = pm.response.json();",
+              "pm.expect(created).to.have.property(\"id\");",
+              "const idxRaw = pm.collectionVariables.get(\"pagSeedCount\") ?? \"0\";",
+              "const tgtRaw = pm.collectionVariables.get(\"pagSeedTarget\") ?? \"35\";",
+              "const idxNow = Number.parseInt(String(idxRaw), 10);",
+              "const target = Number.parseInt(String(tgtRaw), 10);",
+              "pm.expect(Number.isFinite(idxNow) && idxNow >= 0).to.be.true;",
+              "pm.expect(Number.isFinite(target) && target > 0).to.be.true;",
+              "const nextIdx = idxNow + 1;",
+              "pm.collectionVariables.set(\"pagSeedCount\", String(nextIdx));",
+              "if (nextIdx < target) {",
+              "  postman.setNextRequest(seedReq);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "content-type", "value": "application/json" },
+          { "key": "x-api-key", "value": "{{apiKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw":
+            "{\n  \"text\": \"Postman pagination seed — row {{pagSeedCount}} — neutral filler for inbox paging\",\n  \"email\": null\n}"
+        },
+        "url": "{{baseUrl}}/api/feedback"
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/feedback (list)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"status 200 list page 1\", () => pm.response.code === 200);",
+              "const j = pm.response.json();",
+              "pm.expect(j).to.have.property(\"items\");",
+              "pm.expect(j).to.have.property(\"total\");",
+              "pm.expect(j.page).to.eql(1);",
+              "pm.expect(j.pageSize).to.eql(5);",
+              "pm.expect(j.items.length).to.be.at.most(5);",
+              "const seedsPlusCreate = Number.parseInt(String(pm.collectionVariables.get(\"pagSeedTarget\") ?? \"35\"), 10) + 1;",
+              "pm.expect(j.total).to.be.at.least(seedsPlusCreate);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+        "url": "{{baseUrl}}/api/feedback?pageSize=5"
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/feedback (list page 2)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"status 200 list page 2\", () => pm.response.code === 200);",
+              "const j = pm.response.json();",
+              "pm.expect(j.page).to.eql(2);",
+              "pm.expect(j.pageSize).to.eql(5);",
+              "pm.expect(j.items.length).to.be.at.most(5);",
+              "pm.expect(j.items.length).to.be.at.least(1);",
+              "const seedsPlusCreate = Number.parseInt(String(pm.collectionVariables.get(\"pagSeedTarget\") ?? \"35\"), 10) + 1;",
+              "pm.expect(j.total).to.be.at.least(seedsPlusCreate);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+        "url": "{{baseUrl}}/api/feedback?page=2&pageSize=5"
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/feedback/:id (detail)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.code === 200);",
+              "const j = pm.response.json();",
+              "pm.expect(j.id).to.eql(Number(pm.collectionVariables.get(\"feedbackId\")));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+        "url": "{{baseUrl}}/api/feedback/{{feedbackId}}"
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/feedback/invalid-id (400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"status 400\", () => pm.response.code === 400);",
+              "const j = pm.response.json();",
+              "pm.expect(j.error.code).to.eql(\"INVALID_ID\");"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+        "url": "{{baseUrl}}/api/feedback/not-a-number"
       },
       "response": []
     }
